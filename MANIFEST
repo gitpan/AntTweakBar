@@ -1,0 +1,17 @@
+Build.PL
+Changes
+eg/simple-glut.pl
+lib/AntTweakBar.pm
+lib/AntTweakBar.xs
+lib/AntTweakBar/Type.pm
+LICENSE
+MANIFEST
+META.json
+META.yml
+README
+README.md
+src/ppport.h
+t/AntTweakBar.t
+t/init-shutdown.t
+t/vars.t
+typemap
