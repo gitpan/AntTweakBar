@@ -1,23 +1,22 @@
+#!/usr/bin/env perl
+
+# This is almost one-to-one perl's rewrite of C-original
+# http://anttweakbar.sourceforge.net/doc/tools:anttweakbar:examples#twsimpleglut
+# http://sourceforge.net/p/anttweakbar/code/ci/master/tree/examples/TwSimpleGLUT.c
+
 use 5.12.0;
+use strict;
+use warnings;
 
 use OpenGL qw/:all/;
 use AntTweakBar qw/:all/;
 use AntTweakBar::Type;
+use List::MoreUtils qw/pairwise/;
+use List::Util qw/reduce/;
 use Data::Dump qw/dump/;
-use Variable::Magic qw/cast wizard/;
+use Time::HiRes qw/tv_interval gettimeofday/;
 
-sub display {
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
-    glEnable(GL_NORMALIZE);
-
-    AntTweakBar::draw;
-    glutSwapBuffers;
-    glutPostRedisplay;
-}
+sub display;
 
 sub reshape {
     my ($width, $height) = @_;
@@ -30,7 +29,6 @@ sub reshape {
     gluLookAt(0,0,5, 0,0,0, 0,1,0);
     glTranslatef(0, 0.6, -1);
 
-    say "window size: ${width} x ${height}";
     AntTweakBar::window_size($width, $height);
 }
 
@@ -53,301 +51,214 @@ AntTweakBar::GLUTModifiersFunc(\&glutGetModifiers);
 
 reshape(640, 750);
 
-my $bar = AntTweakBar->new("TweakBar & Perl", color => '0 128 0', alpha => 200);
-$bar->add_separator("x-sep");
+sub set_quaternion_from_axis_angle {
+    my ($axis, $angle) = @_;
+    my $sina2 = sin($angle * 0.5);
+    my $norm = sqrt( reduce { $a + $b} map { $_ * $_} @$axis );
+    my $q = [];
+    @$q = map { $sina2 * $_ / $norm } @$axis;
+    $q->[3] = cos( $angle * 0.5 );
+    return $q;
+}
 
-my $custom_type = AntTweakBar::Type->new(
-    "custom_arr",
-    ["a", "b", "c"],
-);
+sub convert_quaternion_t_omatrix {
+    my $q = shift;
+    my $m = [];
+    my $yy2 = 2.0 * $q->[1] * $q->[1];
+    my $xy2 = 2.0 * $q->[0] * $q->[1];
+    my $xz2 = 2.0 * $q->[0] * $q->[2];
+    my $yz2 = 2.0 * $q->[1] * $q->[2];
+    my $zz2 = 2.0 * $q->[2] * $q->[2];
+    my $wz2 = 2.0 * $q->[3] * $q->[2];
+    my $wy2 = 2.0 * $q->[3] * $q->[1];
+    my $wx2 = 2.0 * $q->[3] * $q->[0];
+    my $xx2 = 2.0 * $q->[0] * $q->[0];
 
-my $bool_ro       = 1;
-my $bool_rw       = undef;
-my $int_ro        = 100;
-my $int_rw        = 200;
-my $number_ro     = 3.14;
-my $number_rw     = 2.78;
-my $string_ro     = "abc";
-my $string_rw     = "cde";
-my $color3f_ro    = [1.0, 1.0, 0.0];
-my $color3f_rw    = [0.5, 0.5, 1.0];
-my $color4f_ro    = [1.0, 1.0, 0.0, 0.1];
-my $color4f_rw    = [0.5, 0.5, 1.0, 0.2];
-my $direction_ro  = [1.0, 0.0, 0.0];
-my $direction_rw  = [0.0, 0.0, 1.0];
-my $quaternion_ro = [1.0, 0.1, 0.0, 0.0];
-my $quaternion_rw = [0.0, 1.0, 1.1, 0.0];
-my $custom_ro     = "a";
-my $custom_rw     = undef;
-my $magic_var_rw  = 1.234;
+    $m->[0*4+0] = - $yy2 - $zz2 + 1.0;
+    $m->[0*4+1] = $xy2 + $wz2;
+    $m->[0*4+2] = $xz2 - $wy2;
+    $m->[0*4+3] = 0;
+    $m->[1*4+0] = $xy2 - $wz2;
+    $m->[1*4+1] = - $xx2 - $zz2 + 1.0;
+    $m->[1*4+2] = $yz2 + $wx2;
+    $m->[1*4+3] = 0;
+    $m->[2*4+0] = $xz2 + $wy2;
+    $m->[2*4+1] = $yz2 - $wx2;
+    $m->[2*4+2] = - $xx2 - $yy2 + 1.0;
+    $m->[2*4+3] = 0;
+    $m->[3*4+0] = $m->[3*4+1] = $m->[3*4+2] = 0;
+    $m->[3*4+3] = 1;
 
-my $wizzard = wizard(
-    set => sub { say "set magic to ", ${$_[0]} },
-);
+    return $m;
+}
 
-cast $magic_var_rw, $wizzard;
+sub multiply_quaternions {
+    my ($q1, $q2) = @_;
+    my $qr = [];
+	$qr->[0] = $q1->[3]*$q2->[0] + $q1->[0]*$q2->[3] + $q1->[1]*$q2->[2] - $q1->[2]*$q2->[1];
+	$qr->[1] = $q1->[3]*$q2->[1] + $q1->[1]*$q2->[3] + $q1->[2]*$q2->[0] - $q1->[0]*$q2->[2];
+	$qr->[2] = $q1->[3]*$q2->[2] + $q1->[2]*$q2->[3] + $q1->[0]*$q2->[1] - $q1->[1]*$q2->[0];
+	$qr->[3] = $q1->[3]*$q2->[3] - ($q1->[0]*$q2->[0] + $q1->[1]*$q2->[1] + $q1->[2]*$q2->[2]);
+    return $qr;
+}
 
-# types: bool, integer, number, string, color3f, color4f, direction, quaternion, custom enums
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "bool_ro",
-    type       => 'bool',
-    value      => \$bool_ro,
-    definition => "",
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "bool_rw",
-    type       => 'bool',
-    value      => \$bool_rw,
-    definition => "",
-);
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "integer_ro",
-    type       => 'integer',
-    value      => \$int_ro,
-    definition => "",
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "integer_rw",
-    type       => 'integer',
-    value      => \$int_rw,
-    definition => "max=300 step=5",
-);
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "number_ro",
-    type       => 'number',
-    value      => \$number_ro,
-    definition => "",
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "number_rw",
-    type       => 'number',
-    value      => \$number_rw,
-    definition => "min=0 step=0.01",
-);
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "string_ro",
-    type       => 'string',
-    value      => \$string_ro,
-    definition => "",
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "string_rw",
-    type       => 'string',
-    value      => \$string_rw,
-);
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "color3f_ro",
-    type       => 'color3f',
-    value      => \$color3f_ro,
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "color3f_rw",
-    type       => 'color3f',
-    value      => \$color3f_rw,
-);
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "color4f_ro",
-    type       => 'color4f',
-    value      => \$color4f_ro,
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "color4f_rw",
-    type       => 'color4f',
-    value      => \$color4f_rw,
-);
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "direction_ro",
-    type       => 'direction',
-    value      => \$direction_ro,
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "direction_rw",
-    type       => 'direction',
-    value      => \$direction_rw,
-);
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "quaternion_ro",
-    type       => 'quaternion',
-    value      => \$quaternion_ro,
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "quaternion_rw",
-    type       => 'quaternion',
-    value      => \$quaternion_rw,
-);
-$bar->add_variable(
-    mode       => 'ro',
-    name       => "custom_array_ro",
-    type       => $custom_type,
-    value      => \$custom_ro,
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "custom_array_rw",
-    type       => $custom_type,
-    value      => \$custom_rw,
-);
-$bar->add_variable(
-    mode       => 'rw',
-    name       => "magic_var_rw",
-    type       => "number",
-    value      => \$magic_var_rw,
+my @shape_drawings = (
+    Teapot => { function => \&glutSolidTeapot, arguments => [ 1.0 ] },
+    Torus  => { function => \&glutSolidTorus,  arguments => [ 0.3, 1.0, 16, 32] },
+    Cone   => { function => \&glutSolidCone,   arguments => [ 1.0, 1.5, 64, 4] },
 );
 
-$bar->add_button(
-    name       => "my-btn-name",
-    cb         => sub {
-        say "bool_ro=$bool_ro, bool_rw=$bool_rw";
-        say "int_ro=$int_ro, int_rw=$int_rw";
-        say "number_ro=$number_ro, number_rw=$number_rw";
-        say "string_ro=$string_ro, string_rw=$string_rw";
-        say "color3f_ro=", dump($color3f_ro), ", color3f_rw=", dump($color3f_rw);
-        say "color4f_ro=", dump($color4f_ro), ", color4f_rw=", dump($color4f_rw);
-        say "direction_ro=", dump($direction_ro), ", direction_rw=", dump($direction_rw);
-        say "quaternion_ro=", dump($quaternion_ro), ", quaternion_rw=", dump($quaternion_rw);
-        say "custom_rw=$custom_rw";
-    },
-    definition => "label='dump'",
+# Create some 3D objects (stored in display lists)
+for my $i ( 0 .. @shape_drawings/2-1 ) {
+    my $shape_id = ($i * 2) + 1; # shape_id shouldn't be zero
+    my $defintion = $shape_drawings[$i*2+1];
+    my $drawer = $defintion->{function };
+    my $args   = $defintion->{arguments};
+    glNewList($shape_id, GL_COMPILE);
+    $drawer->(@$args);
+    glEndList;
+}
+
+my $shape_type = AntTweakBar::Type->new(
+    "ShapeType",
+    { map { ($shape_drawings[$_*2] => $_*2) } (0 .. @shape_drawings/2-1) },
 );
-$bar->add_separator("separator2");
-$bar->add_button(
-    name => "remove quaternions & refresh",
-    cb   => sub {
-        if ($quaternion_ro) {
-            $bar->remove_variable('quaternion_ro');
-            $quaternion_ro = undef;
+
+# variables
+my $angle            = 0.8;
+my $axis             = [ 0.7, 0.7, 0.0 ];
+my $zoom             = 1.0;
+my $rotation         = set_quaternion_from_axis_angle($axis, $angle);
+my $rotate_start     = set_quaternion_from_axis_angle($axis, $angle);
+my $auto_rotation    = 0;
+my $rotate_time      = [ gettimeofday ];
+my $light_multiplier = 1.0;
+my $light_direction  = [ -0.57735, -0.57735, -0.57735 ];
+my $material_ambient = [ 0.5, 0.0, 0.0];
+my $material_diffuse = [ 1.0, 1.0, 0.0];
+my $shape            = 2; # torus
+
+sub display {
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_NORMALIZE);
+
+    # set light
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    my $ambient_light = OpenGL::Array->new_list(
+        GL_FLOAT, (0.4 * $light_multiplier) x 3, 1.0);
+    my $diffuse_light = OpenGL::Array->new_list(
+        GL_FLOAT, (0.8 * $light_multiplier) x 3, 1.0);
+    glLightfv_c(GL_LIGHT0, GL_AMBIENT, $ambient_light->ptr);
+    glLightfv_c(GL_LIGHT0, GL_DIFFUSE, $diffuse_light->ptr);
+    my $light_position = OpenGL::Array->new_list(
+        GL_FLOAT, map { $_ * -1 } @$light_direction, 0.0);
+    glLightfv_c(GL_LIGHT0, GL_POSITION, $light_position->ptr);
+
+    # set material
+    my $oga_material_ambient = OpenGL::Array->new_list(
+        GL_FLOAT, @$material_ambient);
+    my $oga_material_diffuse = OpenGL::Array->new_list(
+        GL_FLOAT, @$material_diffuse);
+    glMaterialfv_c(GL_FRONT_AND_BACK, GL_AMBIENT, $oga_material_ambient->ptr);
+    glMaterialfv_c(GL_FRONT_AND_BACK, GL_DIFFUSE, $oga_material_diffuse->ptr);
+
+    # Rotate and draw shape
+    glPushMatrix;
+    {
+        glTranslatef(0.5, -0.3, 0.0);
+        if ($auto_rotation) {
+            my $axis = [0.0, 1.0, 0.0];
+            my $elapsed = tv_interval( $rotate_time, [gettimeofday]);
+            my $angle = $elapsed;
+            my $q = set_quaternion_from_axis_angle($axis, $angle);
+            $rotation = multiply_quaternions($rotate_start, $q);
         }
-        if ($quaternion_rw) {
-            $bar->remove_variable('quaternion_rw');
-            $quaternion_rw = undef;
-        }
-        $bar->set_bar_params(size => '300 600', valueswidth => '200');
-        $bar->refresh;
+        my $m = convert_quaternion_t_omatrix($rotation);
+        glMultMatrixf_p(@$m);
+        glScalef($zoom, $zoom, $zoom);
+        glCallList($shape + 1); # shape_id = shape + 1
     }
-);
+    glPopMatrix;
 
-my $bool = undef;
-my $double = 0.33;
-my $string = "bla-bla";
-my $color3f = [1.0, 0.2, 0.4];
-my $color4f = [0.0, 0.2, 0.4, 1.0];
-my $direction = [1.0, 0.2, 0.4];
-my $quaternion = [0.1, 0.2, 0.4, 1.0];
-my $custom_idx = 0;
-my $b2 = AntTweakBar->new("Perl callbacks");
-$b2->add_variable(
-    mode       => 'ro',
-    name       => "bool_ro_cb",
-    type       => 'bool',
-    cb_read    => sub {
-        say "hello from bool_ro_cb!, bool = $bool";
-        return undef;
-    },
+    AntTweakBar::draw;
+    glutSwapBuffers;
+    glutPostRedisplay;
+}
+
+my $bar = AntTweakBar->new(
+    "TweakBar & Perl",
+    size  => '200 400',
+    color => '96 216 224'
 );
-$b2->add_variable(
+$bar->add_variable(
     mode       => 'rw',
-    name       => "bool_rw_cb",
-    type       => 'bool',
-    cb_read    => sub { $bool; },
-    cb_write   => sub {
-        $bool = shift;
-        say "writing value $bool";
-    }
-);
-$b2->add_variable(
-    mode       => 'ro',
-    name       => "number_ro_cb",
+    name       => "Zoom",
     type       => 'number',
-    cb_read    => sub {
-        say "returning double value $double";
-        $double;
-    },
+    value      => \$zoom,
+    definition => " min=0.01 max=2.5 step=0.01 keyIncr=z keyDecr=Z help='Scale the object (1=original size).' ",
 );
-$b2->add_variable(
+$bar->add_variable(
     mode       => 'rw',
-    name       => "number_rw_cb",
-    type       => 'number',
-    cb_read    => sub { $double },
-    cb_write   => sub { $double = shift; },
-);
-$b2->add_variable(
-    mode       => 'ro',
-    name       => "string_ro_cb",
-    type       => 'string',
-    cb_read    => sub { $string },
-);
-$b2->add_variable(
-    mode       => 'rw',
-    name       => "string_rw_cb",
-    type       => 'string',
-    cb_read    => sub { $string },
-    cb_write   => sub { $string = shift; },
-);
-$b2->add_variable(
-    mode       => 'ro',
-    name       => "color3f_ro_cb",
-    type       => 'color3f',
-    cb_read    => sub { $color3f },
-);
-$b2->add_variable(
-    mode       => 'rw',
-    name       => "color3f_rw_cb",
-    type       => 'color3f',
-    cb_read    => sub { $color3f },
-    cb_write   => sub {
-        @$color3f = @{$_[0]};
-        say "now color3f = " . dump($color3f);
-    },
-);
-$b2->add_variable(
-    mode       => 'rw',
-    name       => "color4f_rw_cb",
-    type       => 'color4f',
-    cb_read    => sub { $color4f },
-    cb_write   => sub { @$color4f = @{$_[0]} },
-);
-$b2->add_variable(
-    mode       => 'rw',
-    name       => "direction_rw_cb",
-    type       => 'direction',
-    cb_read    => sub { $direction },
-    cb_write   => sub { @$direction = @{$_[0]} },
-);
-$b2->add_variable(
-    mode       => 'rw',
-    name       => "quaternion_rw_cb",
+    name       => "ObjRotation",
     type       => 'quaternion',
-    cb_read    => sub { $quaternion },
-    cb_write   => sub { @$quaternion = @{$_[0]} },
+    value      => \$rotation,
+    definition => " label='Object rotation' opened=true help='Change the object orientation.' ",
 );
-$b2->add_variable(
-    mode       => 'ro',
-    name       => "custom_idx_ro_cb",
-    type       => $custom_type,
-    cb_read    => sub { $custom_idx },
-);
-$b2->add_variable(
+$bar->add_variable(
     mode       => 'rw',
-    name       => "custom_idx_rw_cb",
-    type       => $custom_type,
-    cb_read    => sub { $custom_idx },
-    cb_write   => sub { $custom_idx = shift },
+    name       => "AutoRotate",
+    type       => 'bool',
+    cb_read    => sub { $auto_rotation },
+    cb_write   => sub {
+        $auto_rotation = shift;
+        if ($auto_rotation) {
+            $rotate_time = [ gettimeofday ];
+            @$rotate_start = @$rotation;
+            $bar->set_variable_params('ObjRotation', readonly => 'true');
+        }
+        $bar->set_variable_params('ObjRotation', readonly => 'false');
+    },
+    definition => " label='Auto-rotate' key=space help='Toggle auto-rotate mode.' ",
+);
+$bar->add_variable(
+    mode       => 'rw',
+    name       => "Multiplier",
+    type       => 'number',
+    value      => \$light_multiplier,
+    definition => " label='Light booster' min=0.1 max=4 step=0.02 keyIncr='+' keyDecr='-' help='Increase/decrease the light power.' ",
+);
+$bar->add_variable(
+    mode       => 'rw',
+    name       => "LightDir",
+    type       => 'direction',
+    value      => \$light_direction,
+    definition => " label='Light direction' opened=true help='Change the light direction.' ",
+);
+$bar->add_variable(
+    mode       => 'rw',
+    name       => "Ambient",
+    type       => 'color3f',
+    value      => \$material_ambient,
+    definition => " group='Material' ",
+);
+$bar->add_variable(
+    mode       => 'rw',
+    name       => "Diffuse",
+    type       => 'color3f',
+    value      => \$material_diffuse,
+    definition => " group='Material' ",
+);
+$bar->add_variable(
+    mode       => 'rw',
+    name       => "Shape",
+    type       => $shape_type,
+    value      => \$shape,
+    definition => " keyIncr='<' keyDecr='>' help='Change object shape.' ",
 );
 
 glutMainLoop;

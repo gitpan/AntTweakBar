@@ -29,7 +29,7 @@ our @EXPORT = qw(
 
 );
 
-our $VERSION = '0.01_01';
+our $VERSION = '0.01_02';
 
 require XSLoader;
 XSLoader::load('AntTweakBar', $VERSION);
@@ -119,6 +119,13 @@ sub set_bar_params {
     my ($self, %params) = @_;
     while (my ($k, $v) = each(%params)) {
         _set_bar_parameter($self->{_bar_ptr}, $k, $v);
+    }
+}
+
+sub set_variable_params {
+    my ($self, $variable, %params) = @_;
+    while (my ($k, $v) = each(%params)) {
+        _set_variable_parameter($self->{_bar_ptr}, $variable, $k, $v);
     }
 }
 
