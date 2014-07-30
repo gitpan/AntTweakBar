@@ -52,11 +52,11 @@ my $build = Module::Build->new(
     extra_linker_flags   => $all_libs,
     c_source             => 'src',
     needs_compiler       => 1,
-    add_to_cleanup     => [ 'Alien-AntTweakBar-*', 'build_done' ],
+    add_to_cleanup     => [ 'AntTweakBar-*', 'build_done' ],
     meta_merge => {
         resources  => {
-            bugtracker => 'https://github.com/basiliscos/p5-anttweakbar/issues',
-            repository => 'https://github.com/basiliscos/p5-anttweakbar',
+            bugtracker => 'https://github.com/PerlGameDev/AntTweakBar/issues',
+            repository => 'https://github.com/PerlGameDev/AntTweakBar',
         }
     },
 

@@ -31,7 +31,7 @@ our @EXPORT = qw(
 
 );
 
-our $VERSION = '0.03_01';
+our $VERSION = '0.03';
 
 =head1 NAME
 
@@ -115,7 +115,7 @@ following:
     mode       => 'rw',
     name       => "Enabled",
     type       => 'integer',
-    value      => \$enabled
+    value      => \$value
   );
 
 =back
@@ -319,7 +319,7 @@ for the variable.
 =head3 type
 
 Defines the type of variable. Original types L<http://anttweakbar.sourceforge.net/doc/tools:anttweakbar:twtype>
-has been reduced to:
+were reduced to:
 
 =over
 
