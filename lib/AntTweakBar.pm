@@ -31,7 +31,7 @@ our @EXPORT = qw(
 
 );
 
-our $VERSION = '0.03';
+our $VERSION = '0.05_01';
 
 =head1 NAME
 
@@ -79,12 +79,18 @@ AntTweakBar - Perl bindings for AntTweakBar
 
 =head1 DESCRIPTION
 
-=for HTML <p>
-<img src="http://anttweakbar.sourceforge.net/doc/data/media/tools/anttweakbar/twsimplesdl-128.jpg" style="max-width:100%;">
+=for HTML
+<p>
+  <img src="https://raw.githubusercontent.com/PerlGameDev/AntTweakBar/master/eg/available-properties.png" style="max-width:100%;">
+  <img src="https://raw.githubusercontent.com/PerlGameDev/AntTweakBar/master/eg/simple-glut.gif" style="max-width:100%;">
 </p>
+
 
 AntTweakBar (see L<http://anttweakbar.sourceforge.net/>) is nice tiny
 GUI library for OpenGL/SDL/DirectX applications.
+
+If you are in hurry to evaluate it then intall AntTweakBar and try
+examples from C<eg> directory within the distribution.
 
 To display AntTweakBar in your OpenGL/SDL application you should do the
 following:
@@ -546,6 +552,13 @@ L<Alien::AntTweakBar>, L<SDL>, L<OpenGL>, L<http://anttweakbar.sourceforge.net/>
 
 Ivan Baidakou E<lt>dmol@(gmx.com)E<gt>
 
+=head1 CREDITS
+
+=over 2
+
+David Horner
+
+=back
 
 =head1 COPYRIGHT AND LICENSE
 
